@@ -1,0 +1,179 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    
+    // Safety check for user data
+    function getUserData() { 
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; 
+    }
+    
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isBlocked() { 
+      return isVerified() && userExists() && getUserData().get('status', 'active') == 'blocked'; 
+    }
+    
+    // Global Admin / Staff (Superuser)
+    function isAdmin() { 
+      return isVerified() && userExists() && !isBlocked() && (
+        getUserData().get('role', '') in ['Співробітник', 'Staff', 'Admin'] || 
+        request.auth.token.email == 'aptecar87@gmail.com' ||
+        request.auth.uid == 'SET_SUPERADMIN_UID_HERE'
+      ); 
+    }
+
+    // Role-specific editors
+    function canEditFinance() {
+      return isAdmin() || getUserData().get('role', '') in ['finance_editor', 'Finance', 'Senior Mentor'];
+    }
+
+    function canEditLibrary() {
+      return isAdmin() || getUserData().get('role', '') in ['library_manager', 'Library'];
+    }
+
+    function canEditPatients() {
+      return isAdmin() || getUserData().get('role', '') in ['mentor', 'Mentor', 'Senior Mentor'];
+    }
+    
+    function isActive() { return isVerified() && userExists() && !isBlocked(); }
+    function isOwner() { return isActive() && getUserData().get('isOwner', false) == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isUserOwner(uid) { return request.auth.uid == uid; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // --- Entity Specific Validations ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'role', 'status']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.role in ['Співробітник', 'Admin', 'Staff', 'Mentor', 'Senior Mentor', 'Finance', 'finance_editor', 'library_manager', 'Library'] &&
+             data.status in ['active', 'blocked'] &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    match /users/{userId} {
+      allow get: if isVerified() && (isUserOwner(userId) || isActive());
+      allow list: if isActive();
+      allow create: if isVerified() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming()) && !incoming().keys().hasAny(['isAdmin', 'isOwner']) && incoming().status == 'active';
+      allow update: if isActive() && isValidId(userId) && (
+        (isUserOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'photoUrl', 'vision', 'quote', 'specialization'])) ||
+        (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'isOwner']))
+      );
+    }
+
+    function isValidPatient(data) {
+      return data.keys().hasAll(['name', 'status']) &&
+             data.name is string && data.name.size() < 400 && // Increased for encryption
+             data.status in ['Stable', 'Needs Attention', 'Critical'];
+    }
+
+    match /patients/{patientId} {
+      allow get, list: if isActive();
+      allow create, update: if canEditPatients() && isValidId(patientId) && isValidPatient(incoming());
+      allow delete: if isAdmin() && isValidId(patientId);
+    }
+
+    function isValidReport(data) {
+      return (data.keys().hasAll(['patientId', 'mentorId', 'date']) || data.keys().hasAll(['authorId', 'createdAt', 'type'])) &&
+             (data.get('authorId', data.get('mentorId', '')) == request.auth.uid);
+    }
+
+    match /patients/{patientId}/reports/{reportId} {
+      allow get, list: if isActive() && isValidId(patientId);
+      allow create: if canEditPatients() && isValidId(patientId) && isValidId(reportId) && (
+        (incoming().keys().hasAll(['authorId', 'createdAt']) && incoming().authorId == request.auth.uid) ||
+        isValidReport(incoming())
+      );
+      allow update, delete: if isAdmin() && isValidId(patientId) && isValidId(reportId);
+    }
+
+    function isValidMessage(data) {
+      return (data.keys().hasAll(['chatId', 'authorId', 'text', 'timestamp']) || data.keys().hasAll(['userId', 'text', 'createdAt'])) &&
+             (data.get('authorId', data.get('userId', '')) == request.auth.uid) &&
+             data.text is string && data.text.size() < 10000; // Increased for encryption
+    }
+
+    match /chats/{chatId} {
+      allow get, list: if isActive();
+      
+      match /messages/{messageId} {
+        allow get, list: if isActive() && isValidId(chatId);
+        allow create: if isActive() && isValidId(chatId) && isValidId(messageId) && isValidMessage(incoming());
+      }
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['title', 'status', 'date']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.status in ['Active', 'Completed'] &&
+             data.date is string;
+    }
+
+    match /tasks/{taskId} {
+      allow get, list: if isActive();
+      allow create, update, delete: if isActive() && isValidId(taskId) && isValidTask(incoming());
+    }
+
+    function isValidLibraryItem(data) {
+      return data.keys().hasAll(['title', 'category', 'type', 'url']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.category in ['spirituality', 'psychology', 'addiction', 'video'] &&
+             data.type in ['video', 'text', 'document'];
+    }
+
+    match /library/{itemId} {
+      allow get, list: if isActive();
+      allow create, update: if canEditLibrary() && isValidLibraryItem(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /finances/{financeId} {
+      allow get, list: if isActive();
+      allow write: if canEditFinance();
+    }
+
+    function isValidDutyShift(data) {
+      return data.keys().hasAll(['day', 'ministers', 'startTime', 'endTime']) &&
+             data.day is string &&
+             data.ministers is list &&
+             data.startTime is string &&
+             data.endTime is string;
+    }
+
+    match /dutySchedule/{shiftId} {
+      allow get, list: if isActive();
+      allow create, update: if isActive() && isValidId(shiftId) && isValidDutyShift(incoming());
+      allow delete: if isAdmin() && isValidId(shiftId);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['userId', 'title', 'message', 'timestamp', 'read']) &&
+             data.userId is string &&
+             data.title is string &&
+             data.message is string &&
+             data.timestamp is timestamp &&
+             data.read is bool;
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isActive() && isValidId(notificationId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isActive() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isActive() && isValidId(notificationId); 
+      allow update: if isActive() && isValidId(notificationId) && (resource.data.userId == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isActive() && isValidId(notificationId) && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+  }
+}

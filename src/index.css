@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700;900&display=swap');
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", serif;
+  
+  --color-primary: #1e3a5f;
+  --color-primary-dark: #0f1c2d;
+  --color-accent: #f5f2ed;
+  --color-success: #e7f5e9;
+  --color-warning: #fff4e5;
+  --color-danger: #ffebee;
+  
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 font-sans transition-colors duration-300;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer components {
+  .no-select {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.dark body {
+  @apply bg-gray-950 text-gray-100;
+}
+
+.card-shadow {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.dark .card-shadow {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.glass-morphism {
+  @apply bg-white/80 backdrop-blur-md border border-white/20;
+}
+
+.dark .glass-morphism {
+  @apply bg-gray-900/80 backdrop-blur-md border border-white/5;
+}
+
+.news-card {
+  @apply transition-all duration-300 hover:scale-[1.02] active:scale-95 cursor-pointer;
+}
+
+@utility transition-smooth {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+@layer base {
+  input, textarea, select {
+    @apply bg-white border border-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-smooth;
+  }
+  .dark input, .dark textarea, .dark select {
+    @apply bg-gray-900 border-gray-800 text-white focus:ring-primary/40;
+  }
+}
+
+.btn-primary {
+  @apply bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary/90 active:scale-95 transition-smooth flex items-center justify-center gap-2;
+}
+
+.btn-secondary {
+  @apply bg-white border border-gray-200 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-50 active:scale-95 transition-smooth flex items-center justify-center gap-2;
+}
+
+.dark .btn-secondary {
+  @apply bg-gray-900 border-gray-800 text-gray-300 hover:bg-gray-800;
+}

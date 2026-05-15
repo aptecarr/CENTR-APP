@@ -1,0 +1,200 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Співробітник або служитель центру",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["Senior Mentor", "Mentor", "Admin", "Staff"] },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "isOwner": { "type": "boolean" },
+        "photoUrl": { "type": "string" },
+        "specialization": { "type": "string" },
+        "vision": { "type": "string" },
+        "quote": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Patient": {
+      "title": "Підопічний",
+      "description": "Реабілітант центру",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["Stable", "Needs Attention", "Critical"] },
+        "admissionDate": { "type": "string", "format": "date-time" },
+        "birthDate": { "type": "string" },
+        "bloodGroup": { "type": "string" },
+        "education": { "type": "string" },
+        "nativeLanguage": { "type": "string" },
+        "about": { "type": "string" },
+        "mentorId": { "type": "string" },
+        "stage": { "type": "string" },
+        "progress": { "type": "number" },
+        "photoUrl": { "type": "string" },
+        "phone": { "type": "string" },
+        "emergencyContact": { "type": "string" }
+      },
+      "required": ["name", "status"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Звіт після розмови або духовного спостереження",
+      "type": "object",
+      "properties": {
+        "patientId": { "type": "string" },
+        "mentorId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string" },
+        "topics": { "type": "string" },
+        "spiritualState": { "type": "string" },
+        "observedChanges": { "type": "string" },
+        "prayerNeeds": { "type": "string" },
+        "privateNotes": { "type": "string" },
+        "progressStatus": { "type": "string", "enum": ["Improved", "Stable", "Needs Attention"] }
+      },
+      "required": ["patientId", "mentorId", "date"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Повідомлення в чаті",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["text", "quote"] }
+      },
+      "required": ["chatId", "authorId", "text", "timestamp"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Канал чату",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["channel", "direct"] },
+        "lastMessage": { "type": "string" },
+        "lastTimestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Робоче завдання",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "timeStart": { "type": "string" },
+        "timeEnd": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Completed"] },
+        "isImportant": { "type": "boolean" },
+        "location": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["title", "status", "date"]
+    },
+    "LibraryItem": {
+      "title": "Library Item",
+      "description": "Матеріал бібліотеки (книга, відео, стаття)",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "enum": ["spirituality", "psychology", "addiction", "video"] },
+        "type": { "type": "string", "enum": ["video", "text", "document"] },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "type", "url"]
+    },
+    "Finance": {
+      "title": "Finance",
+      "description": "Фінансова транзакція",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "type", "date"]
+    },
+    "DutyShift": {
+      "title": "DutyShift",
+      "description": "Зміна чергування",
+      "type": "object",
+      "properties": {
+        "day": { "type": "string" },
+        "ministers": { "type": "array", "items": { "type": "string" } },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "lastModifiedBy": { "type": "string" },
+        "lastModifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["day", "ministers", "startTime", "endTime"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Сповіщення системи",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "success", "warning", "error"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" },
+        "relatedId": { "type": "string" }
+      },
+      "required": ["userId", "title", "message", "timestamp", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Профілі користувачів"
+    },
+    "/patients/{patientId}": {
+      "schema": "Patient",
+      "description": "Дані підопічних"
+    },
+    "/patients/{patientId}/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Звіти по конкретному підопічному"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Чат"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Повідомлення в каналах"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Загальний список завдань"
+    },
+    "/library/{itemId}": {
+      "schema": "LibraryItem",
+      "description": "Бібліотека матеріалів"
+    },
+    "/finances/{financeId}": {
+      "schema": "Finance",
+      "description": "Фінансові записи"
+    },
+    "/dutySchedule/{shiftId}": {
+      "schema": "DutyShift",
+      "description": "Графік чергувань служителів"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Сповіщення користувачів"
+    }
+  }
+}
