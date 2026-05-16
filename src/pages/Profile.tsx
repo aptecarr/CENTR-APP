@@ -1,249 +1,304 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { auth, db, storage } from '../firebase'; // Перевірте правильність шляху до вашого файлу конфігу Firebase
-import { updateProfile } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { updateProfile } from 'firebase/auth';
+import { db, auth, storage } from '../firebase';
+import { useAuth } from '../hooks/useAuth';
+import { l10n } from '../lib/l10n';
+import { User, Phone, Mail, FileText, Camera, Shield, Save, X, Loader2, Compass, Quote } from 'lucide-react';
 
-interface UserData {
-  displayName: string;
+interface UserProfileData {
+  name: string;
   email: string;
   phone?: string;
-  photoURL?: string;
-  bio?: string;
+  photoUrl?: string;
+  specialization?: string;
+  vision?: string;
+  quote?: string;
+  role?: string;
 }
 
-export default function Profile() {
-  const currentUser = auth.currentUser;
+export function Profile() {
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Стан для даних користувача та режиму редагування
-  const [userData, setUserData] = useState<UserData>({
-    displayName: currentUser?.displayName || '',
-    email: currentUser?.email || '',
+  // Ініціалізація стану згідно з firebase-blueprint.json
+  const [profile, setProfile] = useState<UserProfileData>({
+    name: user?.displayName || '',
+    email: user?.email || '',
     phone: '',
-    photoURL: currentUser?.photoURL || 'https://via.placeholder.com/150',
-    bio: '',
+    photoUrl: user?.photoURL || '',
+    specialization: '',
+    vision: '',
+    quote: '',
+    role: '',
   });
 
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  // 1. Завантаження додаткових даних користувача з Firestore при старті
+  // 1. Завантаження даних профілю з Firestore
   useEffect(() => {
-    async function loadUserData() {
-      if (!currentUser) return;
+    async function fetchProfileData() {
+      if (!user?.uid) return;
       try {
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserData(prev => ({
-            ...prev,
-            displayName: data.displayName || currentUser.displayName || '',
+        const docRef = doc(db, 'users', user.uid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setProfile({
+            name: data.name || user.displayName || '',
+            email: data.email || user.email || '',
             phone: data.phone || '',
-            photoURL: data.photoURL || currentUser.photoURL || 'https://via.placeholder.com/150',
-            bio: data.bio || '',
-          }));
+            photoUrl: data.photoUrl || user.photoURL || '',
+            specialization: data.specialization || '',
+            vision: data.vision || '',
+            quote: data.quote || '',
+            role: data.role || '',
+          });
         }
       } catch (error) {
-        console.error("Помилка завантаження профілю:", error);
+        console.error('Помилка при завантаженні профілю з Firestore:', error);
       }
     }
-    loadUserData();
-  }, [currentUser]);
 
-  // 2. Обробник кліку на фото (тригерить прихований input)
-  const handlePhotoClick = () => {
+    fetchProfileData();
+  }, [user]);
+
+  // 2. Клік по аватару викликає системне вікно вибору файлу
+  const triggerFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
   };
 
-  // 3. Завантаження фото у Firebase Storage та оновлення профілю
+  // 3. Завантаження фото у Firebase Storage та оновлення посилань
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !currentUser) return;
+    if (!file || !user?.uid) return;
 
     setUploadingPhoto(true);
     try {
-      // Створюємо унікальний шлях для файлу
-      const fileRef = ref(storage, `avatars/${currentUser.uid}_${Date.now()}`);
-      
-      // Завантажуємо файл
-      await uploadBytes(fileRef, file);
-      
-      // Отримуємо посилання
-      const downloadURL = await getDownloadURL(fileRef);
+      // Завантаження у сховище за унікальним шляхом
+      const storageRef = ref(storage, `avatars/${user.uid}_${Date.now()}`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
 
-      // Оновлюємо Firebase Auth
-      await updateProfile(currentUser, { photoURL: downloadURL });
+      // Синхронізація: оновлюємо і профіль Auth, і точне поле photoUrl у Firestore
+      await updateProfile(user, { photoURL: downloadURL });
+      await updateDoc(doc(db, 'users', user.uid), { photoUrl: downloadURL });
 
-      // Оновлюємо Firestore
-      const userDocRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userDocRef, { photoURL: downloadURL });
-
-      // Оновлюємо локальний стан інтерфейсу
-      setUserData(prev => ({ ...prev, photoURL: downloadURL }));
-      alert("Фото успішно оновлено!");
+      setProfile((prev) => ({ ...prev, photoUrl: downloadURL }));
+      alert('Фото профілю успішно оновлено!');
     } catch (error) {
-      console.error("Помилка при завантаженні фото:", error);
-      alert("Не вдалося завантажити фото. Перевірте правила Storage.");
+      console.error('Помилка Firebase Storage:', error);
+      alert('Не вдалося завантажити фото. Перевірте, чи активовано Storage у вашій консолі Firebase.');
     } finally {
       setUploadingPhoto(false);
     }
   };
 
-  // 4. Збереження текстових даних (Ім'я, телефон тощо)
-  const handleSaveChanges = async (e: React.FormEvent) => {
+  // 4. Збереження текстових змін у профілі
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
+    if (!user?.uid) return;
 
     setLoading(true);
     try {
-      // Оновлюємо відображуване ім'я в Auth
-      await updateProfile(currentUser, { displayName: userData.displayName });
-
-      // Оновлюємо всі поля в Firestore документі користувача
-      const userDocRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userDocRef, {
-        displayName: userData.displayName,
-        phone: userData.phone,
-        bio: userData.bio,
+      // Оновлюємо відображуване ім'я в системі автентифікації
+      await updateProfile(user, { displayName: profile.name });
+      
+      // Оновлюємо документ користувача у Firestore відповідно до схеми
+      await updateDoc(doc(db, 'users', user.uid), {
+        name: profile.name,
+        phone: profile.phone,
+        specialization: profile.specialization,
+        vision: profile.vision,
+        quote: profile.quote,
       });
 
       setIsEditing(false);
-      alert("Профіль успішно збережено!");
+      alert('Зміни успішно збережено!');
     } catch (error) {
-      console.error("Помилка збереження даних:", error);
-      alert("Помилка при збереженні даних.");
+      console.error('Помилка збереження у Firestore:', error);
+      alert('Сталася помилка при збереженні. Перевірте верифікацію вашого акаунту.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!currentUser) {
-    return <div className="p-6 text-center text-red-500">Будь ласка, авторизуйтесь в системі.</div>;
-  }
+  if (!user) return null;
 
   return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md mt-10">
-      {/* Шапка профілю з кнопкою Налаштувань (Шестірнею) */}
-      <div className="flex justify-between items-center border-b pb-4 mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Особистий кабінет</h2>
-        <button 
-          onClick={() => setIsEditing(!isEditing)} 
-          className={`p-2 rounded-full hover:bg-gray-100 transition-colors ${isEditing ? 'text-blue-600 bg-blue-50' : 'text-gray-500'}`}
-          title="Налаштування профілю (Редагувати)"
-        >
-          {/* Іконка Шестірні (тепер активна!) */}
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Блок інтерактивної фотографії */}
-      <div className="flex flex-col items-center mb-6 relative">
-        <div 
-          onClick={handlePhotoClick}
-          className="relative group cursor-pointer w-32 h-32 rounded-full overflow-hidden border-4 border-gray-200 shadow-inner"
-        >
-          <img 
-            src={userData.photoURL} 
-            alt="Аватар користувача" 
-            className="w-full h-full object-cover transition-opacity group-hover:opacity-75"
-          />
-          {/* Оверлей при наведенні (сигнал користувачу, що можна клікнути) */}
-          <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-white text-xs font-medium text-center px-2">
-              {uploadingPhoto ? 'Завантаження...' : 'Змінити фото'}
-            </span>
-          </div>
-        </div>
+    <div className="max-w-4xl mx-auto px-4 py-8 pb-safe">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden card-shadow">
         
-        {/* Прихований інпут для вибору файлу */}
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          accept="image/*" 
-          className="hidden" 
-        />
-        
-        <p className="text-xs text-gray-400 mt-2">Клікніть на фото, щоб завантажити нове</p>
+        {/* Верхній градієнтний банер */}
+        <div className="h-32 bg-gradient-to-r from-[#1e3a5f] to-[#0f1c2d] relative" />
+
+        <div className="p-6 sm:p-8 relative -mt-16">
+          <form onSubmit={handleSave} className="space-y-6">
+            
+            {/* Аватар та блок керування режимом редагування */}
+            <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 border-b border-gray-100 pb-6">
+              <div className="relative group cursor-pointer" onClick={triggerFileInput}>
+                <div className="w-28 h-28 rounded-full bg-gray-100 border-4 border-white shadow-md overflow-hidden flex items-center justify-center">
+                  {profile.photoUrl ? (
+                    <img src={profile.photoUrl} alt={profile.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-12 h-12 text-gray-400" />
+                  )}
+                </div>
+                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Camera className="w-6 h-6 text-white" />
+                </div>
+                {uploadingPhoto && (
+                  <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-white animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                accept="image/*" 
+                className="hidden" 
+              />
+
+              <div className="text-center sm:text-left flex-1">
+                <h1 className="text-2xl font-bold text-gray-900">{profile.name || l10n.noName || 'Користувач'}</h1>
+                <div className="flex items-center justify-center sm:justify-start mt-1 text-sm text-gray-500 space-x-2">
+                  <Shield className="w-4 h-4 text-[#1e3a5f]" />
+                  <span className="font-medium bg-gray-100 text-gray-800 px-2.5 py-0.5 rounded-full text-xs">
+                    {profile.role || 'Служитель'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                {!isEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-all active:scale-95"
+                  >
+                    Редагувати профіль
+                  </button>
+                ) : (
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="p-2 border border-gray-200 rounded-xl text-gray-500 hover:bg-gray-50 transition-all"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-all flex items-center space-x-2"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      <span>Зберегти</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Інформаційні поля форми */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <User className="w-3.5 h-3.5" /> <span>ПІБ</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={!isEditing}
+                  value={profile.name}
+                  onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                  className="w-full p-2 border rounded-lg disabled:bg-gray-50 disabled:text-gray-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <Mail className="w-3.5 h-3.5" /> <span>Електронна пошта</span>
+                </label>
+                <input
+                  type="email"
+                  disabled
+                  value={profile.email}
+                  className="w-full p-2 border rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <Phone className="w-3.5 h-3.5" /> <span>Телефон</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={!isEditing}
+                  value={profile.phone}
+                  onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                  placeholder="+380..."
+                  className="w-full p-2 border rounded-lg disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <FileText className="w-3.5 h-3.5" /> <span>Спеціалізація в центрі</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={!isEditing}
+                  value={profile.specialization}
+                  onChange={(e) => setProfile({ ...profile, specialization: e.target.value })}
+                  placeholder="Наприклад: Наставник"
+                  className="w-full p-2 border rounded-lg disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <Compass className="w-3.5 h-3.5" /> <span>Бачення служіння</span>
+                </label>
+                <textarea
+                  disabled={!isEditing}
+                  value={profile.vision}
+                  onChange={(e) => setProfile({ ...profile, vision: e.target.value })}
+                  rows={3}
+                  placeholder="Ваше особисте бачення розвитку служіння..."
+                  className="w-full p-2 border rounded-lg disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase flex items-center space-x-1">
+                  <Quote className="w-3.5 h-3.5" /> <span>Духовне кредо / Цитата</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={!isEditing}
+                  value={profile.quote}
+                  onChange={(e) => setProfile({ ...profile, quote: e.target.value })}
+                  placeholder="Ваше життєве кредо..."
+                  className="w-full p-2 border rounded-lg disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+
+            </div>
+          </form>
+        </div>
       </div>
-
-      {/* Форма редагування / перегляду даних */}
-      <form onSubmit={handleSaveChanges} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Електронна пошта (ID)</label>
-          <input 
-            type="email" 
-            value={userData.email} 
-            disabled 
-            className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-gray-500 cursor-not-allowed"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Ім'я користувача</label>
-          <input 
-            type="text" 
-            value={userData.displayName} 
-            disabled={!isEditing} 
-            onChange={(e) => setUserData({...userData, displayName: e.target.value})}
-            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Номер телефону</label>
-          <input 
-            type="text" 
-            value={userData.phone} 
-            disabled={!isEditing} 
-            onChange={(e) => setUserData({...userData, phone: e.target.value})}
-            placeholder="+380..."
-            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Про себе / Нотатки</label>
-          <textarea 
-            value={userData.bio} 
-            disabled={!isEditing} 
-            onChange={(e) => setUserData({...userData, bio: e.target.value})}
-            rows={3}
-            placeholder="Додаткова інформація про користувача..."
-            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
-          />
-        </div>
-
-        {/* Кнопки збереження (з'являються лише в режимі редагування) */}
-        {isEditing && (
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <button 
-              type="button" 
-              onClick={() => setIsEditing(false)}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Скасувати
-            </button>
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-blue-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              {loading ? 'Збереження...' : 'Зберегти зміни'}
-            </button>
-          </div>
-        )}
-      </form>
     </div>
   );
 }
