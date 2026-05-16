@@ -1,134 +1,249 @@
-import React from 'react';
-import { motion } from 'motion/react';
-import { 
-  Settings, ChevronRight, Bell, Shield, 
-  HelpCircle, LogOut, Quote, Heart, 
-  Calendar, Star, Mail, Edit3, Users 
-} from 'lucide-react';
-import { cn } from '../lib/utils';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { auth, db, storage } from '../firebase'; // Перевірте правильність шляху до вашого файлу конфігу Firebase
+import { updateProfile } from 'firebase/auth';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-import { useAuth } from '../providers/AuthProvider';
+interface UserData {
+  displayName: string;
+  email: string;
+  phone?: string;
+  photoURL?: string;
+  bio?: string;
+}
 
-export const Profile: React.FC = () => {
-  const { user, profile, logout } = useAuth();
-  
-  const mentor = {
-    name: user?.displayName || user?.email?.split('@')[0] || 'Олександр Сила',
-    role: profile?.role === 'Admin' ? 'Адміністратор' : (profile?.role || 'Ментор'),
-    vision: profile?.vision || 'Моє покликання — допомагати людям знаходити шлях до світла через духовне відновлення та підтримку.',
-    quote: profile?.quote || '"Бог не дав нам духа страху, але сили, любові та здорового розуму."',
-    specialization: profile?.specialization || 'Духовне наставництво, психологія залежностей',
-    photoUrl: user?.photoURL || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&h=200&fit=crop',
+export default function Profile() {
+  const currentUser = auth.currentUser;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Стан для даних користувача та режиму редагування
+  const [userData, setUserData] = useState<UserData>({
+    displayName: currentUser?.displayName || '',
+    email: currentUser?.email || '',
+    phone: '',
+    photoURL: currentUser?.photoURL || 'https://via.placeholder.com/150',
+    bio: '',
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState<boolean>(false);
+
+  // 1. Завантаження додаткових даних користувача з Firestore при старті
+  useEffect(() => {
+    async function loadUserData() {
+      if (!currentUser) return;
+      try {
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setUserData(prev => ({
+            ...prev,
+            displayName: data.displayName || currentUser.displayName || '',
+            phone: data.phone || '',
+            photoURL: data.photoURL || currentUser.photoURL || 'https://via.placeholder.com/150',
+            bio: data.bio || '',
+          }));
+        }
+      } catch (error) {
+        console.error("Помилка завантаження профілю:", error);
+      }
+    }
+    loadUserData();
+  }, [currentUser]);
+
+  // 2. Обробник кліку на фото (тригерить прихований input)
+  const handlePhotoClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
   };
 
-  const menuItems = [
-    ...(profile?.role === 'Admin' ? [{ label: 'Управління учасниками', icon: Users, color: 'bg-green-50 text-green-600', to: '/users' }] : []),
-    { label: 'Мої замітки та молитви', icon: Edit3, color: 'bg-blue-50 text-blue-600' },
-    { label: 'Налаштування графіку', icon: Calendar, color: 'bg-purple-50 text-purple-600', to: '/schedule' },
-    { label: 'Сповіщення та безпека', icon: Bell, color: 'bg-orange-50 text-orange-600', to: '/notifications/settings' },
-    { label: 'Служба підтримки', icon: HelpCircle, color: 'bg-gray-100 text-gray-600', to: '/support' },
-  ];
+  // 3. Завантаження фото у Firebase Storage та оновлення профілю
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    setUploadingPhoto(true);
+    try {
+      // Створюємо унікальний шлях для файлу
+      const fileRef = ref(storage, `avatars/${currentUser.uid}_${Date.now()}`);
+      
+      // Завантажуємо файл
+      await uploadBytes(fileRef, file);
+      
+      // Отримуємо посилання
+      const downloadURL = await getDownloadURL(fileRef);
+
+      // Оновлюємо Firebase Auth
+      await updateProfile(currentUser, { photoURL: downloadURL });
+
+      // Оновлюємо Firestore
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userDocRef, { photoURL: downloadURL });
+
+      // Оновлюємо локальний стан інтерфейсу
+      setUserData(prev => ({ ...prev, photoURL: downloadURL }));
+      alert("Фото успішно оновлено!");
+    } catch (error) {
+      console.error("Помилка при завантаженні фото:", error);
+      alert("Не вдалося завантажити фото. Перевірте правила Storage.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  // 4. Збереження текстових даних (Ім'я, телефон тощо)
+  const handleSaveChanges = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    setLoading(true);
+    try {
+      // Оновлюємо відображуване ім'я в Auth
+      await updateProfile(currentUser, { displayName: userData.displayName });
+
+      // Оновлюємо всі поля в Firestore документі користувача
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userDocRef, {
+        displayName: userData.displayName,
+        phone: userData.phone,
+        bio: userData.bio,
+      });
+
+      setIsEditing(false);
+      alert("Профіль успішно збережено!");
+    } catch (error) {
+      console.error("Помилка збереження даних:", error);
+      alert("Помилка при збереженні даних.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!currentUser) {
+    return <div className="p-6 text-center text-red-500">Будь ласка, авторизуйтесь в системі.</div>;
+  }
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl mx-auto pb-24 h-full overflow-y-auto bg-gray-50 dark:bg-gray-950 transition-colors">
-      {/* Mentor Profile Header */}
-      <div className="bg-white dark:bg-gray-900 p-8 rounded-[40px] shadow-sm border border-gray-100 dark:border-gray-800 text-center space-y-4 relative overflow-hidden transition-colors">
-        <div className="absolute top-4 right-4 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-smooth cursor-pointer text-gray-400">
-          <Settings size={20} />
+    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md mt-10">
+      {/* Шапка профілю з кнопкою Налаштувань (Шестірнею) */}
+      <div className="flex justify-between items-center border-b pb-4 mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Особистий кабінет</h2>
+        <button 
+          onClick={() => setIsEditing(!isEditing)} 
+          className={`p-2 rounded-full hover:bg-gray-100 transition-colors ${isEditing ? 'text-blue-600 bg-blue-50' : 'text-gray-500'}`}
+          title="Налаштування профілю (Редагувати)"
+        >
+          {/* Іконка Шестірні (тепер активна!) */}
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Блок інтерактивної фотографії */}
+      <div className="flex flex-col items-center mb-6 relative">
+        <div 
+          onClick={handlePhotoClick}
+          className="relative group cursor-pointer w-32 h-32 rounded-full overflow-hidden border-4 border-gray-200 shadow-inner"
+        >
+          <img 
+            src={userData.photoURL} 
+            alt="Аватар користувача" 
+            className="w-full h-full object-cover transition-opacity group-hover:opacity-75"
+          />
+          {/* Оверлей при наведенні (сигнал користувачу, що можна клікнути) */}
+          <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-white text-xs font-medium text-center px-2">
+              {uploadingPhoto ? 'Завантаження...' : 'Змінити фото'}
+            </span>
+          </div>
         </div>
         
-        <div className="relative inline-block">
-          <img 
-            src={mentor.photoUrl} 
-            alt={mentor.name} 
-            className="w-32 h-32 rounded-[40px] object-cover border-4 border-primary/5 mx-auto shadow-xl"
+        {/* Прихований інпут для вибору файлу */}
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleFileChange} 
+          accept="image/*" 
+          className="hidden" 
+        />
+        
+        <p className="text-xs text-gray-400 mt-2">Клікніть на фото, щоб завантажити нове</p>
+      </div>
+
+      {/* Форма редагування / перегляду даних */}
+      <form onSubmit={handleSaveChanges} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Електронна пошта (ID)</label>
+          <input 
+            type="email" 
+            value={userData.email} 
+            disabled 
+            className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-gray-500 cursor-not-allowed"
           />
-          <div className="absolute -bottom-2 -right-2 p-3 bg-primary text-white rounded-2xl shadow-lg">
-            <Star size={20} fill="currentColor" />
-          </div>
         </div>
 
-        <div className="space-y-1">
-          <h2 className="text-2xl font-bold font-display text-gray-900 dark:text-white">{mentor.name}</h2>
-          <p className="text-[10px] font-bold text-primary dark:text-blue-400 uppercase tracking-[0.2em]">{mentor.role}</p>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Ім'я користувача</label>
+          <input 
+            type="text" 
+            value={userData.displayName} 
+            disabled={!isEditing} 
+            onChange={(e) => setUserData({...userData, displayName: e.target.value})}
+            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
+            required
+          />
         </div>
 
-        <div className="flex justify-center gap-3 pt-2">
-          <button className="p-3 bg-gray-50 dark:bg-gray-800 rounded-2xl hover:bg-primary hover:text-white transition-smooth text-gray-400">
-            <Mail size={20} />
-          </button>
-          <button className="p-3 bg-gray-50 dark:bg-gray-800 rounded-2xl hover:bg-primary hover:text-white transition-smooth text-gray-400">
-            <Shield size={20} />
-          </button>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Номер телефону</label>
+          <input 
+            type="text" 
+            value={userData.phone} 
+            disabled={!isEditing} 
+            onChange={(e) => setUserData({...userData, phone: e.target.value})}
+            placeholder="+380..."
+            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
+          />
         </div>
-      </div>
 
-      {/* Vision & Quote Section */}
-      <div className="space-y-4">
-        <div className="bg-yellow-50/50 dark:bg-yellow-900/10 p-6 rounded-[32px] border border-yellow-100/50 dark:border-yellow-700/20 space-y-3 relative group">
-          <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 font-bold text-[10px] uppercase tracking-widest">
-            <Heart size={14} /> Моє служіння та бачення
-          </div>
-          <p className="text-sm text-yellow-900 dark:text-yellow-300 leading-relaxed italic">
-            {mentor.vision}
-          </p>
-          <div className="pt-4 mt-4 border-t border-yellow-100/30">
-            <div className="flex gap-3">
-              <Quote size={24} className="text-yellow-600/20 shrink-0" />
-              <p className="text-xs font-bold text-yellow-700 dark:text-yellow-500 leading-relaxed uppercase tracking-tight">
-                {mentor.quote}
-              </p>
-            </div>
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Про себе / Нотатки</label>
+          <textarea 
+            value={userData.bio} 
+            disabled={!isEditing} 
+            onChange={(e) => setUserData({...userData, bio: e.target.value})}
+            rows={3}
+            placeholder="Додаткова інформація про користувача..."
+            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${!isEditing ? 'bg-gray-50 text-gray-700' : 'bg-white text-black'}`}
+          />
         </div>
-      </div>
 
-      {/* Profile Menu */}
-      <div className="space-y-3">
-        {menuItems.map((item, i) => (
-          item.to ? (
-            <Link
-              key={i}
-              to={item.to}
-              className="w-full bg-white dark:bg-gray-900 p-4 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center justify-between group transition-colors"
+        {/* Кнопки збереження (з'являються лише в режимі редагування) */}
+        {isEditing && (
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <button 
+              type="button" 
+              onClick={() => setIsEditing(false)}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              <div className="flex items-center gap-4">
-                <div className={cn("p-3 rounded-2xl transition-smooth group-hover:scale-110", item.color)}>
-                  <item.icon size={20} />
-                </div>
-                <span className="font-bold text-sm text-gray-700 dark:text-gray-300">{item.label}</span>
-              </div>
-              <ChevronRight size={20} className="text-gray-300 dark:text-gray-600 group-hover:text-primary transition-smooth" />
-            </Link>
-          ) : (
-            <button
-              key={i}
-              className="w-full bg-white dark:bg-gray-900 p-4 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center justify-between group transition-colors text-left"
-            >
-              <div className="flex items-center gap-4">
-                <div className={cn("p-3 rounded-2xl transition-smooth group-hover:scale-110", item.color)}>
-                  <item.icon size={20} />
-                </div>
-                <span className="font-bold text-sm text-gray-700 dark:text-gray-300">{item.label}</span>
-              </div>
-              <ChevronRight size={20} className="text-gray-300 dark:text-gray-600 group-hover:text-primary transition-smooth" />
+              Скасувати
             </button>
-          )
-        ))}
-      </div>
-
-      {/* Logout */}
-      <button 
-        onClick={logout}
-        className="w-full flex items-center justify-center gap-2 p-5 text-orange-600 font-bold text-sm uppercase tracking-widest rounded-3xl border-2 border-dashed border-orange-100 dark:border-orange-900/30 hover:bg-orange-50 dark:hover:bg-orange-900/10 transition-smooth mt-4"
-      >
-        <LogOut size={20} /> Вийти з облікового запису
-      </button>
-
-      <div className="text-center py-6">
-        <p className="text-[10px] text-gray-300 font-bold uppercase tracking-[0.3em]">Версія 2.4.1 (Stable)</p>
-      </div>
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-blue-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              {loading ? 'Збереження...' : 'Зберегти зміни'}
+            </button>
+          </div>
+        )}
+      </form>
     </div>
   );
-};
+}
