@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { db, auth, storage } from '../lib/firebase'; // ВИПРАВЛЕНО ШЛЯХ ДО FIREBASE
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { updateProfile } from 'firebase/auth';
-import { db, auth, storage } from '../firebase';
 import { useAuth } from '../hooks/useAuth';
 import { l10n } from '../lib/l10n';
 import { User, Phone, Mail, FileText, Camera, Shield, Save, X, Loader2, Compass, Quote } from 'lucide-react';
@@ -22,7 +22,7 @@ export function Profile() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Ініціалізація стану згідно з firebase-blueprint.json
+  // Ініціалізація стану згідно з вашим архітектурним планом
   const [profile, setProfile] = useState<UserProfileData>({
     name: user?.displayName || '',
     email: user?.email || '',
@@ -67,7 +67,7 @@ export function Profile() {
     fetchProfileData();
   }, [user]);
 
-  // 2. Клік по аватару викликає системне вікно вибору файлу
+  // 2. Клік по аватару викликає вікно вибору файлу
   const triggerFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -81,12 +81,11 @@ export function Profile() {
 
     setUploadingPhoto(true);
     try {
-      // Завантаження у сховище за унікальним шляхом
       const storageRef = ref(storage, `avatars/${user.uid}_${Date.now()}`);
       await uploadBytes(storageRef, file);
       const downloadURL = await getDownloadURL(storageRef);
 
-      // Синхронізація: оновлюємо і профіль Auth, і точне поле photoUrl у Firestore
+      // Синхронізація з Auth та точним полем photoUrl у Firestore
       await updateProfile(user, { photoURL: downloadURL });
       await updateDoc(doc(db, 'users', user.uid), { photoUrl: downloadURL });
 
@@ -94,7 +93,7 @@ export function Profile() {
       alert('Фото профілю успішно оновлено!');
     } catch (error) {
       console.error('Помилка Firebase Storage:', error);
-      alert('Не вдалося завантажити фото. Перевірте, чи активовано Storage у вашій консолі Firebase.');
+      alert('Не вдалося завантажити фото. Перевірте сховище у консолі Firebase.');
     } finally {
       setUploadingPhoto(false);
     }
@@ -107,10 +106,8 @@ export function Profile() {
 
     setLoading(true);
     try {
-      // Оновлюємо відображуване ім'я в системі автентифікації
       await updateProfile(user, { displayName: profile.name });
       
-      // Оновлюємо документ користувача у Firestore відповідно до схеми
       await updateDoc(doc(db, 'users', user.uid), {
         name: profile.name,
         phone: profile.phone,
@@ -123,7 +120,7 @@ export function Profile() {
       alert('Зміни успішно збережено!');
     } catch (error) {
       console.error('Помилка збереження у Firestore:', error);
-      alert('Сталася помилка при збереженні. Перевірте верифікацію вашого акаунту.');
+      alert('Сталася помилка при збереженні. Перевірте верифікацію пошти або правила безпеки.');
     } finally {
       setLoading(false);
     }
@@ -135,13 +132,13 @@ export function Profile() {
     <div className="max-w-4xl mx-auto px-4 py-8 pb-safe">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden card-shadow">
         
-        {/* Верхній градієнтний банер */}
+        {/* Банер */}
         <div className="h-32 bg-gradient-to-r from-[#1e3a5f] to-[#0f1c2d] relative" />
 
         <div className="p-6 sm:p-8 relative -mt-16">
           <form onSubmit={handleSave} className="space-y-6">
             
-            {/* Аватар та блок керування режимом редагування */}
+            {/* Аватар та Керування */}
             <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 border-b border-gray-100 pb-6">
               <div className="relative group cursor-pointer" onClick={triggerFileInput}>
                 <div className="w-28 h-28 rounded-full bg-gray-100 border-4 border-white shadow-md overflow-hidden flex items-center justify-center">
@@ -161,12 +158,13 @@ export function Profile() {
                 )}
               </div>
 
+              {/* Нативний інпут, захищений від перекриття CSS-шарами */}
               <input 
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
                 accept="image/*" 
-                className="hidden" 
+                style={{ display: 'none', width: 0, height: 0, position: 'absolute' }} 
               />
 
               <div className="text-center sm:text-left flex-1">
@@ -210,7 +208,7 @@ export function Profile() {
               </div>
             </div>
 
-            {/* Інформаційні поля форми */}
+            {/* Поля форми */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               <div className="space-y-1">
