@@ -3,7 +3,8 @@ import { Search, Filter, Plus, ChevronRight, AlertCircle, CheckCircle2, X, User,
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { db, OperationType, handleFirestoreError } from '../lib/firebase';
+import { db, handleFirestoreError } from '../lib/firebase';
+import type { OperationType } from '../lib/firebase';
 import { collection, onSnapshot, addDoc, query, orderBy } from 'firebase/firestore';
 import { encryptText, decryptText } from '../lib/encryption';
 import { useAuth } from '../hooks/useAuth';
