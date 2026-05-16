@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage'; // Зберігаємо імпорт сховища для фото
+import { getStorage } from 'firebase/storage';
 
 // Конфігурація вашого Firebase проекту
 const firebaseConfig = {
@@ -20,6 +20,11 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+/**
+ * Тип операцій Firestore, який імпортується у src/components/Layout.tsx
+ */
+export type OperationType = 'create' | 'read' | 'update' | 'delete' | 'unknown';
 
 /**
  * Функція обробки помилок Firestore, яку вимагає src/components/Layout.tsx
