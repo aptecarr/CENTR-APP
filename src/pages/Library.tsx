@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Search, Play, Book, FileText, Video as VideoIcon, ExternalLink } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
-import { db, OperationType, handleFirestoreError } from '../lib/firebase';
+import { db, handleFirestoreError } from '../lib/firebase';
+import type { OperationType } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { l10n } from '../lib/l10n';
 
