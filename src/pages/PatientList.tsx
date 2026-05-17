@@ -1,20 +1,39 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, ChevronRight, AlertCircle, CheckCircle2, X, User, UserPlus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, Filter, Plus, ChevronRight, AlertCircle, CheckCircle2, X, User, UserPlus, Camera, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { db, handleFirestoreError } from '../lib/firebase';
-import type { OperationType } from '../lib/firebase';
+import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { collection, onSnapshot, addDoc, query, orderBy } from 'firebase/firestore';
 import { encryptText, decryptText } from '../lib/encryption';
 import { useAuth } from '../hooks/useAuth';
 
+export type PatientStatus = '1_stage' | '2_stage' | 'adaptation' | 'archive_completed' | 'archive_escaped' | 'archive_expelled';
+
 interface Patient {
   id: string;
   name: string;
-  status: 'Stable' | 'Needs Attention' | 'Critical';
+  status: PatientStatus;
   admissionDate: string;
   photoUrl: string;
+  stage: string;
+  progress: number;
+}
+
+export interface PatientData {
+  id: string;
+  fullName: string;
+  birthDate: string;
+  admissionDate: string;
+  location: string;
+  phone: string;
+  relativeName: string;
+  relativePhone: string;
+  relativeStatus: string;
+  militaryStatus: string;
+  belongings: string;
+  photoUrl: string;
+  status: PatientStatus;
   stage: string;
   progress: number;
 }
@@ -39,9 +58,9 @@ const PatientCard = React.memo(({ patient }: { patient: Patient }) => (
       />
       <div className={cn(
         "absolute -bottom-1 -right-1 p-1 rounded-full border-2 border-white dark:border-gray-900",
-        patient.status === 'Stable' ? "bg-green-500" : patient.status === 'Critical' ? "bg-red-500" : "bg-orange-500"
+        patient.status.startsWith('archive') ? "bg-gray-500" : patient.status === 'adaptation' ? "bg-blue-500" : "bg-green-500"
       )}>
-        {patient.status === 'Stable' ? <CheckCircle2 size={12} className="text-white" /> : <AlertCircle size={12} className="text-white" />}
+        {patient.status.startsWith('archive') ? <AlertCircle size={12} className="text-white" /> : <CheckCircle2 size={12} className="text-white" />}
       </div>
     </div>
     
@@ -89,16 +108,31 @@ export const PatientList: React.FC = () => {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'All' | 'Stable' | 'Needs Attention' | 'Critical'>('All');
+  const [filter, setFilter] = useState<'rehab' | 'adaptation' | 'archive'>('rehab');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newPatient, setNewPatient] = useState({
-    name: '',
-    status: 'Stable' as const,
-    admissionDate: new Date().toLocaleDateString('uk-UA'),
-    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop',
-    stage: 'Адаптація',
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const initialPatientData: PatientData = {
+    id: '',
+    fullName: '',
+    birthDate: '',
+    admissionDate: new Date().toISOString().split('T')[0],
+    location: '',
+    phone: '',
+    relativeName: '',
+    relativePhone: '',
+    relativeStatus: '',
+    militaryStatus: '',
+    belongings: '',
+    photoUrl: '',
+    status: '1_stage',
+    stage: '1 Етап',
     progress: 10
-  });
+  };
+
+  const [newPatient, setNewPatient] = useState<PatientData>(initialPatientData);
 
   useEffect(() => {
     setIsLoading(true);
@@ -123,27 +157,74 @@ export const PatientList: React.FC = () => {
 
   const filteredPatients = patients.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter === 'All' || p.status === filter;
+    let matchesFilter = false;
+    if (filter === 'rehab') matchesFilter = p.status === '1_stage' || p.status === '2_stage';
+    else if (filter === 'adaptation') matchesFilter = p.status === 'adaptation';
+    else if (filter === 'archive') matchesFilter = p.status === 'archive_completed' || p.status === 'archive_escaped' || p.status === 'archive_expelled';
     return matchesSearch && matchesFilter;
   });
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingPhoto(true);
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 400;
+            const MAX_HEIGHT = 400;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+            } else {
+              if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
+          };
+          img.onerror = reject;
+        };
+        reader.onerror = reject;
+      });
+      setNewPatient(prev => ({ ...prev, photoUrl: base64Data }));
+    } catch (error) {
+      console.error('Photo error', error);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   const handleAddPatient = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      // Set to DB, encrypting names/phone where necessary
+      const [year, month, day] = newPatient.admissionDate.split('-');
+      const formattedAdmissionDate = `${day}.${month}.${year}`;
+      
+      const { id, ...patientToSave } = newPatient;
+      
       await addDoc(collection(db, 'patients'), {
-        ...newPatient,
-        name: encryptText(newPatient.name), // ENCRYPT
-        admissionDate: new Date().toLocaleDateString('uk-UA')
+        ...patientToSave,
+        name: encryptText(newPatient.fullName), // Use fullName as main name
+        phone: encryptText(newPatient.phone),
+        admissionDate: formattedAdmissionDate
       });
       setIsModalOpen(false);
-      setNewPatient({
-        name: '',
-        status: 'Stable',
-        admissionDate: '',
-        photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop',
-        stage: 'Адаптація',
-        progress: 10
-      });
+      setNewPatient(initialPatientData);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'patients');
     }
@@ -177,20 +258,39 @@ export const PatientList: React.FC = () => {
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {['All', 'Stable', 'Needs Attention', 'Critical'].map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f as any)}
-              className={cn(
-                "whitespace-nowrap px-4 py-2 rounded-xl text-[10px] font-bold transition-smooth uppercase tracking-widest",
-                filter === f 
-                  ? "bg-primary text-white shadow-lg shadow-primary/20" 
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-              )}
-            >
-              {f === 'All' ? 'Усі' : f === 'Stable' ? 'Стабільні' : f === 'Needs Attention' ? 'Потребують уваги' : 'Критичні'}
-            </button>
-          ))}
+          <button
+            onClick={() => setFilter('rehab')}
+            className={cn(
+              "whitespace-nowrap px-4 py-2 rounded-xl text-[10px] font-bold transition-smooth uppercase tracking-widest",
+              filter === 'rehab' 
+                ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+            )}
+          >
+            Реабілітація
+          </button>
+          <button
+            onClick={() => setFilter('adaptation')}
+            className={cn(
+              "whitespace-nowrap px-4 py-2 rounded-xl text-[10px] font-bold transition-smooth uppercase tracking-widest",
+              filter === 'adaptation' 
+                ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+            )}
+          >
+            Адаптація (3 етап)
+          </button>
+          <button
+            onClick={() => setFilter('archive')}
+            className={cn(
+              "whitespace-nowrap px-4 py-2 rounded-xl text-[10px] font-bold transition-smooth uppercase tracking-widest",
+              filter === 'archive' 
+                ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+            )}
+          >
+            Архів
+          </button>
         </div>
       </div>
 
@@ -253,59 +353,162 @@ export const PatientList: React.FC = () => {
                 </button>
               </div>
 
-              <form onSubmit={handleAddPatient} className="space-y-4">
+              <form onSubmit={handleAddPatient} className="space-y-4 max-h-[80vh] overflow-y-auto px-1 scrollbar-hide pb-10">
+                {/* Photo Upload Section */}
+                <div className="flex flex-col items-center gap-4 py-4">
+                  <div className="relative w-28 h-28 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center overflow-hidden border-4 border-gray-50 dark:border-gray-900 shadow-xl">
+                    {isUploadingPhoto ? (
+                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                    ) : newPatient.photoUrl ? (
+                      <img src={newPatient.photoUrl} alt="Patient" className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={40} className="text-gray-300 dark:text-gray-600" />
+                    )}
+                  </div>
+                  <div className="flex gap-2 w-full">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition-smooth hover:bg-gray-200 dark:hover:bg-gray-700"
+                    >
+                      <ImageIcon size={16} />
+                      З ПРИСТРОЮ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary/10 text-primary rounded-xl text-xs font-bold transition-smooth hover:bg-primary/20"
+                    >
+                      <Camera size={16} />
+                      ЗРОБИТИ ФОТО
+                    </button>
+                  </div>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+                  <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handlePhotoUpload} />
+                </div>
+
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Повне ім'я</label>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">ПІБ (Прізвище, Ім'я, По батькові)</label>
                   <input 
                     required
                     type="text" 
-                    value={newPatient.name}
-                    onChange={(e) => setNewPatient({ ...newPatient, name: e.target.value })}
+                    value={newPatient.fullName}
+                    onChange={(e) => setNewPatient({ ...newPatient, fullName: e.target.value })}
                     className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
-                    placeholder="Іван Іванов..."
+                    placeholder="Іванов Іван Іванович..."
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Статус</label>
-                    <select 
-                      value={newPatient.status}
-                      onChange={(e) => setNewPatient({ ...newPatient, status: e.target.value as any })}
-                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
-                    >
-                      <option value="Stable">Стабільний</option>
-                      <option value="Needs Attention">Потребує уваги</option>
-                      <option value="Critical">Критичний</option>
-                    </select>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Дата народження</label>
+                    <input 
+                      type="date" 
+                      required
+                      value={newPatient.birthDate}
+                      onChange={(e) => setNewPatient({ ...newPatient, birthDate: e.target.value })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20 [&::-webkit-calendar-picker-indicator]:dark:invert"
+                    />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Прогрес (%)</label>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Дата поступлення</label>
                     <input 
-                      type="number" 
-                      min="0" 
-                      max="100"
-                      value={newPatient.progress}
-                      onChange={(e) => setNewPatient({ ...newPatient, progress: parseInt(e.target.value) })}
-                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                      type="date" 
+                      required
+                      value={newPatient.admissionDate}
+                      onChange={(e) => setNewPatient({ ...newPatient, admissionDate: e.target.value })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20 [&::-webkit-calendar-picker-indicator]:dark:invert"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Етап реабілітації</label>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Телефон</label>
+                  <input 
+                    type="tel"
+                    value={newPatient.phone}
+                    onChange={(e) => setNewPatient({ ...newPatient, phone: e.target.value })}
+                    placeholder="+380"
+                    className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Місце проживання</label>
                   <input 
                     type="text" 
-                    value={newPatient.stage}
-                    onChange={(e) => setNewPatient({ ...newPatient, stage: e.target.value })}
+                    value={newPatient.location}
+                    onChange={(e) => setNewPatient({ ...newPatient, location: e.target.value })}
                     className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
-                    placeholder="Адаптація, Соціалізація..."
+                    placeholder="Область, місто/село, вулиця..."
+                  />
+                </div>
+
+                <div className="space-y-1.5 border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Військовий статус</label>
+                  <select
+                    value={newPatient.militaryStatus}
+                    onChange={(e) => setNewPatient({ ...newPatient, militaryStatus: e.target.value })}
+                    className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">Оберіть статус...</option>
+                    <option value="Військовозобов'язаний">Військовозобов'язаний</option>
+                    <option value="Не військовозобов'язаний">Не військовозобов'язаний</option>
+                    <option value="В СЗЧ">В СЗЧ</option>
+                    <option value="На обліку">На обліку</option>
+                    <option value="Знятий з обліку">Знятий з обліку</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5 pt-2">
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white pb-2 px-1">Близький родич</h4>
+                  <div className="grid grid-cols-1 gap-4">
+                    <input 
+                      type="text" 
+                      value={newPatient.relativeName}
+                      onChange={(e) => setNewPatient({ ...newPatient, relativeName: e.target.value })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                      placeholder="Ім'я родича..."
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <select
+                        value={newPatient.relativeStatus}
+                        onChange={(e) => setNewPatient({ ...newPatient, relativeStatus: e.target.value })}
+                        className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                      >
+                        <option value="">Статус...</option>
+                        <option value="Батько">Батько</option>
+                        <option value="Мати">Мати</option>
+                        <option value="Брат">Брат</option>
+                        <option value="Сестра">Сестра</option>
+                        <option value="Дружина">Дружина</option>
+                        <option value="Син">Син</option>
+                        <option value="Донька">Донька</option>
+                      </select>
+                      <input 
+                        type="tel"
+                        value={newPatient.relativePhone}
+                        onChange={(e) => setNewPatient({ ...newPatient, relativePhone: e.target.value })}
+                        placeholder="+380"
+                        className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Особисті речі при вступі (чемодан)</label>
+                  <textarea 
+                    value={newPatient.belongings}
+                    onChange={(e) => setNewPatient({ ...newPatient, belongings: e.target.value })}
+                    className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-4 py-3 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20 min-h-[80px]"
+                    placeholder="Наприклад: Телефон Samsung, документи, змінний одяг..."
                   />
                 </div>
 
                 <button 
                   type="submit"
-                  className="w-full py-4 bg-primary text-white rounded-2xl font-bold text-sm uppercase tracking-widest shadow-xl shadow-primary/20 hover:bg-primary/90 transition-smooth mt-4"
+                  className="w-full py-4 bg-primary text-white rounded-2xl font-bold text-sm uppercase tracking-widest shadow-xl shadow-primary/20 hover:bg-primary/90 transition-smooth mt-6"
                 >
                   Додати підопічного
                 </button>

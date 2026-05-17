@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -23,16 +23,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // SET_SUPERADMIN_UID_HERE: Add logic to automatically assign Admin role if UID matches
     const superAdminUid = ''; // Placeholder for manual setup
 
-    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+    let unsubscribeDoc: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = undefined;
+      }
+      
       if (authUser) {
-        try {
-          const userDocRef = doc(db, 'users', authUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
+        let isFirstFetch = true;
+        
+        unsubscribeDoc = onSnapshot(doc(db, 'users', authUser.uid), async (userDoc) => {
           if (userDoc.exists()) {
             setProfile(userDoc.data());
-          } else {
+          } else if (isFirstFetch) {
             // Provision initial profile
             const isFirstAdmin = authUser.uid === superAdminUid || authUser.email === 'aptecar87@gmail.com';
             const newProfile = {
@@ -41,22 +47,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: authUser.email,
               role: isFirstAdmin ? 'Admin' : 'Mentor',
               status: 'active',
+              permissions: {
+                isAdmin: isFirstAdmin,
+                isFinanceResponsible: false,
+                isScheduleManager: false
+              },
               createdAt: new Date().toISOString()
             };
             
-            await setDoc(userDocRef, newProfile);
-            setProfile(newProfile);
+            try {
+              await setDoc(doc(db, 'users', authUser.uid), newProfile);
+              // Optimistically set profile to avoid flashing
+              setProfile(newProfile);
+            } catch (err) {
+              console.error("Auth initialization error:", err);
+            }
           }
-        } catch (error) {
-          console.error("Auth initialization error:", error);
-        }
+          isFirstFetch = false;
+        }, (error) => {
+          console.error("Error fetching profile via onSnapshot:", error);
+        });
       } else {
         setProfile(null);
       }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+      }
+      unsubscribeAuth();
+    };
   }, []);
 
   const signIn = async () => {

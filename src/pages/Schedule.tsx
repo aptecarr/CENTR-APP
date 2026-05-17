@@ -13,8 +13,7 @@ import {
   collection, onSnapshot, doc, setDoc, query, where,
   orderBy, limit, addDoc, serverTimestamp, getDocs, updateDoc 
 } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../lib/firebase';
-import type { OperationType } from '../lib/firebase';
+import { OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import { encryptText, decryptText } from '../lib/encryption';
 

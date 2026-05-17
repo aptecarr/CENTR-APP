@@ -26,9 +26,12 @@ export const decryptText = (cipherText: string): string => {
   try {
     const bytes = CryptoJS.AES.decrypt(cipherText, SECRET_KEY);
     const originalText = bytes.toString(CryptoJS.enc.Utf8);
-    return originalText || '[Помилка розкодування]';
+    // If it's valid UTF-8 and not empty, it was likely successfully decrypted
+    if (originalText) return originalText;
+    // Fallback to original text if decryption result is empty (common for non-AES strings)
+    return cipherText;
   } catch (error) {
-    console.error('Decryption failed:', error);
-    return '[Помилка розкодування]';
+    // If decryption fails, it's likely plain text (legacy data)
+    return cipherText;
   }
 };

@@ -10,13 +10,21 @@ import { cn } from '../lib/utils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestore';
 
+interface Permissions {
+  isAdmin?: boolean;
+  isFinanceResponsible?: boolean;
+  isScheduleManager?: boolean;
+}
+
 interface UserRecord {
   uid: string;
   name: string;
   email: string;
-  role: 'Senior Mentor' | 'Mentor' | 'Admin' | 'Staff';
+  photoURL?: string;
+  avatarUrl?: string;
   status: 'active' | 'blocked';
   isOwner?: boolean;
+  permissions?: Permissions;
 }
 
 export const UserManagement: React.FC = () => {
@@ -47,11 +55,15 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const changeRole = async (uid: string, role: UserRecord['role']) => {
+  const togglePermission = async (uid: string, currentPermissions: Permissions | undefined, key: keyof Permissions) => {
     try {
-      await updateDoc(doc(db, 'users', uid), { role });
+      const newPermissions = { ...currentPermissions };
+      newPermissions[key] = !newPermissions[key];
+      await updateDoc(doc(db, 'users', uid), { 
+        permissions: newPermissions 
+      });
     } catch (error) {
-      console.error("Error updating role:", error);
+      console.error("Error updating permission:", error);
     }
   };
 
@@ -62,6 +74,29 @@ export const UserManagement: React.FC = () => {
     const matchesTab = activeTab === 'all' || u.status === activeTab;
     return matchesSearch && matchesTab;
   });
+
+  const ToggleSwitch = ({ label, checked, onChange, disabled }: { label: string, checked: boolean, onChange: () => void, disabled?: boolean }) => (
+    <label className={cn("flex flex-col items-center gap-1.5 cursor-pointer", disabled && "opacity-50 cursor-default")}>
+      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest text-center h-6 flex items-end">{label}</span>
+      <div className="relative">
+        <input 
+          type="checkbox" 
+          className="sr-only" 
+          checked={checked} 
+          onChange={onChange}
+          disabled={disabled}
+        />
+        <div className={cn(
+          "w-10 h-5 bg-gray-200 dark:bg-gray-700 rounded-full shadow-inner transition-colors",
+          checked && "bg-primary dark:bg-blue-600"
+        )}></div>
+        <div className={cn(
+          "absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform",
+          checked && "translate-x-5"
+        )}></div>
+      </div>
+    </label>
+  );
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-1000 transition-colors duration-300">
@@ -116,81 +151,105 @@ export const UserManagement: React.FC = () => {
         ) : (
           <>
             <AnimatePresence mode="popLayout">
-              {filteredUsers.map((user, i) => (
-                <motion.div
-                  key={user.uid}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  whileHover={{ scale: 1.01 }}
-                  transition={{ delay: i * 0.05 }}
-                  className={cn(
-                    "bg-white dark:bg-gray-900 p-5 rounded-[32px] shadow-sm border flex items-center gap-4 group transition-smooth",
-                    user.status === 'blocked' ? 
-                      "border-red-100 dark:border-red-900/30 bg-red-50/10 dark:bg-red-900/5 opacity-70" : 
-                      "border-transparent dark:border-gray-800 hover:border-primary/10 dark:hover:border-primary/30"
-                  )}
-                >
-                  <div className="w-12 h-12 rounded-2xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-blue-400 font-bold text-lg shrink-0">
-                    {user.name ? user.name[0] : '?'}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-gray-900 dark:text-white truncate">{user.name}</h4>
-                      {user.isOwner && (
-                        <span className="px-1.5 py-0.5 bg-yellow-400 text-primary rounded-full text-[8px] font-black uppercase tracking-widest">
-                          Власник
-                        </span>
-                      )}
-                      {user.status === 'blocked' && (
-                        <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-[8px] font-black uppercase tracking-widest">
-                          Заблоковано
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest truncate">{user.email}</p>
-                      <span className="hidden sm:inline text-gray-200 dark:text-gray-800">|</span>
-                      <select 
-                        value={user.role}
-                        disabled={user.isOwner}
-                        onChange={(e) => changeRole(user.uid, e.target.value as any)}
-                        className="text-[10px] text-primary dark:text-blue-400 font-bold uppercase tracking-widest bg-primary/5 dark:bg-blue-900/10 px-2 py-0.5 rounded-lg border-none focus:ring-1 focus:ring-primary outline-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
-                      >
-                        <option value="Senior Mentor">Senior Mentor</option>
-                        <option value="Mentor">Mentor</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Staff">Staff</option>
-                      </select>
-                    </div>
-                  </div>
+              {filteredUsers.map((user, i) => {
+                const isAdmin = user.permissions?.isAdmin === true;
+                const isFinance = user.permissions?.isFinanceResponsible === true;
+                const isSchedule = user.permissions?.isScheduleManager === true;
+                const isJustServant = !isAdmin && !isFinance && !isSchedule;
 
-                  <div className="flex items-center gap-1">
-                    {user.status === 'active' ? (
-                      <button 
-                        disabled={user.isOwner}
-                        onClick={() => toggleStatus(user.uid, user.status)}
-                        className="p-2 text-gray-300 dark:text-gray-600 hover:text-red-500 transition-smooth disabled:opacity-20" 
-                        title="Заблокувати"
-                      >
-                        <UserMinus size={20} />
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => toggleStatus(user.uid, user.status)}
-                        className="p-2 text-gray-300 dark:text-gray-600 hover:text-green-500 transition-smooth" 
-                        title="Розблокувати"
-                      >
-                        <UserCheck size={20} />
-                      </button>
+                const photoURL = user.photoURL || user.avatarUrl;
+
+                return (
+                  <motion.div
+                    key={user.uid}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: i * 0.05 }}
+                    className={cn(
+                      "bg-white dark:bg-gray-900 p-5 rounded-[32px] shadow-sm border flex flex-col md:flex-row md:items-center gap-6 transition-smooth",
+                      user.status === 'blocked' ? 
+                        "border-red-100 dark:border-red-900/30 bg-red-50/10 dark:bg-red-900/5 opacity-70" : 
+                        "border-transparent dark:border-gray-800 hover:border-primary/10 dark:hover:border-primary/30"
                     )}
-                    <button className="p-2 text-gray-300 dark:text-gray-600 hover:text-primary transition-smooth">
-                      <MoreVertical size={20} />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
+                  >
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-blue-400 font-bold text-xl shrink-0 overflow-hidden shadow-inner">
+                        {photoURL ? (
+                          <img src={photoURL} alt={user.name} className="w-full h-full object-cover" />
+                        ) : (
+                          user.name ? user.name[0]?.toUpperCase() : '?'
+                        )}
+                      </div>
+                      
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-lg text-gray-900 dark:text-white truncate">{user.name}</h4>
+                          {user.isOwner && (
+                            <span className="px-2 py-0.5 bg-yellow-400 text-primary rounded-full text-[9px] font-black uppercase tracking-widest">
+                              Власник
+                            </span>
+                          )}
+                          {user.status === 'blocked' && (
+                            <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-[9px] font-black uppercase tracking-widest">
+                              Заблоковано
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 font-medium truncate">{user.email}</p>
+                        
+                        {isJustServant && (
+                          <div className="inline-block mt-1 px-2.5 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg text-[10px] font-bold uppercase tracking-widest">
+                            Служитель
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+                      <ToggleSwitch 
+                        label="Адмін" 
+                        checked={isAdmin} 
+                        disabled={user.isOwner}
+                        onChange={() => togglePermission(user.uid, user.permissions, 'isAdmin')} 
+                      />
+                      <ToggleSwitch 
+                        label="Фінанси" 
+                        checked={isFinance} 
+                        disabled={user.isOwner}
+                        onChange={() => togglePermission(user.uid, user.permissions, 'isFinanceResponsible')} 
+                      />
+                      <ToggleSwitch 
+                        label="Графік" 
+                        checked={isSchedule} 
+                        disabled={user.isOwner}
+                        onChange={() => togglePermission(user.uid, user.permissions, 'isScheduleManager')} 
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1 justify-end md:border-l md:border-gray-100 dark:md:border-gray-800 md:pl-4 shrink-0">
+                      {user.status === 'active' ? (
+                        <button 
+                          disabled={user.isOwner}
+                          onClick={() => toggleStatus(user.uid, user.status)}
+                          className="p-2.5 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 rounded-xl transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400" 
+                          title="Заблокувати"
+                        >
+                          <UserMinus size={18} />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => toggleStatus(user.uid, user.status)}
+                          className="p-2.5 text-gray-400 hover:bg-green-50 hover:text-green-500 dark:hover:bg-green-900/20 rounded-xl transition-colors" 
+                          title="Розблокувати"
+                        >
+                          <UserCheck size={18} />
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
 
             {filteredUsers.length === 0 && (
@@ -205,3 +264,4 @@ export const UserManagement: React.FC = () => {
     </div>
   );
 };
+

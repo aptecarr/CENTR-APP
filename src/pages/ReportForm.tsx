@@ -7,8 +7,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
-import { db, handleFirestoreError } from '../lib/firebase';
-import type { OperationType } from '../lib/firebase';
+import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '../providers/AuthProvider';
 import { encryptText, decryptText } from '../lib/encryption';
